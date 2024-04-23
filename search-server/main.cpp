@@ -59,8 +59,9 @@ public:
     void AddDocument(int document_id, const string& document) {
         const vector<string> words = SplitIntoWordsNoStop(document);
         int size = words.size();
+        double word_portion = 1. / size;
         for (const string& word: words) {
-                documents_[word][document_id] += 1. / size;
+                documents_[word][document_id] += word_portion;
         }
         ++document_count_;    
     }
@@ -139,9 +140,8 @@ private:
         vector<Document> document_relevance;
 
         for (const string& word : query_words.plus) {
-            if (documents_.count(word)) {
-                int size = documents_.at(word).size();
-                double word_idf = log(static_cast<double>(document_count_) / size);
+            if (documents_.count(word)) {                
+                double word_idf = GetIDF(documents_.at(word).size());
                 
                 for (const auto& doc_id_with_tf : documents_.at(word)) {                     
                     if (tmp_document_relevance.count(doc_id_with_tf.first)) {
@@ -169,6 +169,10 @@ private:
             document_relevance.push_back({key, value});
         }
         return document_relevance;
+    }
+
+    double GetIDF(int volume_doc_set) const {
+        return log(static_cast<double>(document_count_) / volume_doc_set);
     }
 };
 
