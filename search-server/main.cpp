@@ -2,6 +2,7 @@
 #include <cmath>
 #include <iostream>
 #include <map>
+#include <numeric>
 #include <set>
 #include <string>
 #include <utility>
@@ -10,6 +11,7 @@
 using namespace std;
 
 const int MAX_RESULT_DOCUMENT_COUNT = 5;
+const double MINIMAL_DIFFERENCE = 1e-6;
 
 string ReadLine() {
     string s;
@@ -24,12 +26,24 @@ int ReadLineWithNumber() {
     return result;
 }
 
-vector<string> SplitIntoWords(const string& text) {
-    vector<string> words;
-    string word;
-    for (const char c : text) {
+bool HasIllegalSymbol(const string& word) {
+    for (const auto& c : word) {
+        if ((c >= '\0') && (c < ' ')) {
+            return  true;
+        }
+    }
+    return false;
+}
+
+vector<string> SplitIntoWords(const string& text) {              //  Добавил проверку на спецсимволы в SplitIntoWords,
+    vector<string> words;                                        //  так как SplitIntoWordsNoStop вызывается только в AddDocument
+    string word;                                                 //  и внутри себя вызывает SplitIntoWords, которая вызывается всегда, 
+    for (const char c : text) {                                  //  когда нужно разделить строку на слова
         if (c == ' ') {
             if (!word.empty()) {
+                if (HasIllegalSymbol(word)) {                      
+                    throw invalid_argument("Wrong symbol!"s);       
+                }
                 words.push_back(word);
                 word.clear();
             }
@@ -37,7 +51,10 @@ vector<string> SplitIntoWords(const string& text) {
             word += c;
         }
     }
-    if (!word.empty()) {
+    if (!word.empty()) {                                    
+        if (HasIllegalSymbol(word)) {                      
+            throw invalid_argument("Wrong symbol!"s);       
+        }
         words.push_back(word);
     }
 
@@ -79,13 +96,11 @@ enum class DocumentStatus {
 class SearchServer {
 public:
     
-    inline static constexpr int INVALID_DOCUMENT_ID = -1;
-    
     template <typename StringContainer>
     explicit SearchServer(const StringContainer& stop_words) : stop_words_(MakeUniqueNonEmptyStrings(stop_words)) {
         for (const string& str: stop_words) {
-            if (HasIllegalSymbol(str)) {
-                throw invalid_argument("Wrong symbol!"s); 
+            if (HasIllegalSymbol(str)) {                    //   Эту проверку оставляю, так как конструктору теоретически может быть передана не строка,
+                throw invalid_argument("Wrong symbol!"s);   //   а заранее собранный set или vector стоп-слов 
             }
         }
     }
@@ -93,11 +108,11 @@ public:
     explicit SearchServer(const string& stop_words_text) : SearchServer(SplitIntoWords(stop_words_text)) {}
 
     void AddDocument(int document_id, const string& document, DocumentStatus status, const vector<int>& ratings) {
-        if ((document_id < 0) || (documents_.count(document_id))) {
-            throw invalid_argument("Wrong id!"s); 
+        if (document_id < 0) {
+            throw invalid_argument("Negative id!"s); 
         }
-        if (HasIllegalSymbol(document)) {
-            throw invalid_argument("Wrong symbol!"s); 
+        if (documents_.count(document_id)) {
+            throw invalid_argument("There is already a document with the same id!"s); 
         }
 
         const vector<string> words = SplitIntoWordsNoStop(document);
@@ -111,15 +126,12 @@ public:
 
     template <typename DocumentPredicate>
     vector<Document> FindTopDocuments(const string& raw_query, DocumentPredicate document_predicate) const {
-        if (HasIllegalSymbol(raw_query)) {
-            throw invalid_argument("Wrong symbol!"s);
-        }
         const Query query = ParseQuery(raw_query);
-        
+
         vector<Document> result = FindAllDocuments(query, document_predicate);
         sort(result.begin(), result.end(),
              [](const Document& lhs, const Document& rhs) {
-                 if (abs(lhs.relevance - rhs.relevance) < 1e-6) {
+                 if (abs(lhs.relevance - rhs.relevance) < MINIMAL_DIFFERENCE) {
                      return lhs.rating > rhs.rating;
                  } else {
                      return lhs.relevance > rhs.relevance;
@@ -146,9 +158,6 @@ public:
     }
 
     tuple<vector<string>, DocumentStatus> MatchDocument(const string& raw_query, int document_id) const {
-        if (HasIllegalSymbol(raw_query)) {
-            throw invalid_argument("Wrong symbol!"s);
-        }
         const Query query = ParseQuery(raw_query);
 
         vector<string> matched_words;
@@ -176,7 +185,7 @@ public:
         if ((index < 0) || (index >= doc_order_.size())) {
             throw out_of_range("Wrong index!"s);
         }
-        return doc_order_[index];
+        return doc_order_.at(index);
     }
 
 private:
@@ -188,15 +197,6 @@ private:
     map<string, map<int, double>> word_to_document_freqs_;
     map<int, DocumentData> documents_;
     vector<int> doc_order_;
-    
-    static bool HasIllegalSymbol(const string& word) {
-        for (const auto& c : word) {
-            if ((c >= '\0') && (c < ' ')) {
-                return  true;
-            }
-        }
-        return false;
-    }
 
     bool IsStopWord(const string& word) const {
         return stop_words_.count(word) > 0;
@@ -216,11 +216,7 @@ private:
         if (ratings.empty()) {
             return 0;
         }
-        int rating_sum = 0;
-        for (const int rating : ratings) {
-            rating_sum += rating;
-        }
-        return rating_sum / static_cast<int>(ratings.size());
+        return accumulate(ratings.begin(), ratings.end(), 0) / static_cast<int>(ratings.size());
     }
 
     struct QueryWord {
@@ -238,6 +234,9 @@ private:
             is_minus = true;
             text = text.substr(1);
         }
+        if (HasIllegalSymbol(text)) {                    
+            throw invalid_argument("Wrong symbol!"s);   
+        }
         return {text, is_minus, IsStopWord(text)};
     }
 
@@ -249,10 +248,10 @@ private:
     Query ParseQuery(const string& text) const {
         Query query;
         for (const string& word : SplitIntoWords(text)) {
-            const QueryWord query_word = ParseQueryWord(word);
-            if (!query_word.is_stop) {
-                if (query_word.is_minus) {
-                    query.minus_words.insert(query_word.data);
+            const QueryWord query_word = ParseQueryWord(word);     //   Функция ParseQueryWord вызывается только здесь и проверка word на спецсимволы
+            if (!query_word.is_stop) {                             //   происходит строкой выше в SplitIntoWords, так что думаю в самой ParseQueryWord
+                if (query_word.is_minus) {                         //   проверять на спецсимволы будет излишним.
+                    query.minus_words.insert(query_word.data);     //   (но я все равно добавил на случай если захотим вызвать ParseQueryWord где-то еще)
                 } else {
                     query.plus_words.insert(query_word.data);
                 }
