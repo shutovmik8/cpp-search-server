@@ -115,9 +115,6 @@ public:
             throw invalid_argument("Wrong symbol!"s);
         }
         const Query query = ParseQuery(raw_query);
-        if (IsIllegalStopWord(query.minus_words)) {
-            throw invalid_argument("Wrong stop-word!"s); 
-        }
         
         vector<Document> result = FindAllDocuments(query, document_predicate);
         sort(result.begin(), result.end(),
@@ -153,9 +150,6 @@ public:
             throw invalid_argument("Wrong symbol!"s);
         }
         const Query query = ParseQuery(raw_query);
-        if (IsIllegalStopWord(query.minus_words)) {
-            throw invalid_argument("Wrong stop-word!"s);
-        }
 
         vector<string> matched_words;
         for (const string& word : query.plus_words) {
@@ -204,13 +198,6 @@ private:
         return false;
     }
 
-    static bool IsIllegalStopWord(const set<string>& minus_words) {
-        for (const string& word : minus_words) {
-            if ((word.size() == 0) || (word[0] == '-')) return true;
-        }
-        return false;
-    }
-
     bool IsStopWord(const string& word) const {
         return stop_words_.count(word) > 0;
     }
@@ -245,6 +232,9 @@ private:
     QueryWord ParseQueryWord(string text) const {
         bool is_minus = false;
         if (text[0] == '-') {
+            if ((text.size() == 1) || (text[1] == '-')) {
+                throw invalid_argument("Wrong stop-word!"s); 
+            }
             is_minus = true;
             text = text.substr(1);
         }
